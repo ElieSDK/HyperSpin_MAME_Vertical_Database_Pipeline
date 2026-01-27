@@ -94,6 +94,43 @@ with open(MAME_XML, "w", encoding="utf-8") as f:
     )
 
 # =================================================
+# 1b) ADD DODONPACHI SAIDAI-OU-JOU TO HYPERSPIN DB
+# =================================================
+print("Adding DoDonPachi SaiDaiOuJou to HyperSpin DB...")
+
+target = "DoDonPachi Dai-Ou-Jou Tamashii (V201, China)"
+
+new_entry = """<game name="ddpsdoj" index="" image="">
+	<description>DoDonPachi SaiDaiOuJou (2012/ 4/20)</description>
+	<cloneof />
+	<crc />
+	<manufacturer>Cave</manufacturer>
+	<year>2012</year>
+	<genre>Shoot-'Em-Up</genre>
+	<rating />
+	<enabled>Yes</enabled>
+</game>
+"""
+
+lines = HS_XML.read_text(encoding="utf-8").splitlines(keepends=True)
+out, wait, inserted = [], False, False
+
+for line in lines:
+    out.append(line)
+    if target in line:
+        wait = True
+    if wait and "</game>" in line:
+        out.append(new_entry + "\n")
+        inserted = True
+        wait = False
+
+if inserted:
+    HS_XML.write_text("".join(out), encoding="utf-8")
+    print("✔ DoDonPachi added to Mame 0.284.xml")
+else:
+    print("⚠ Target game not found, entry not inserted")
+
+# =================================================
 # 2) KEEP VERTICAL GAMES ONLY
 # =================================================
 print("Filtering vertical games...")
@@ -137,39 +174,7 @@ for genre, games in by_genre.items():
     )
 
 # =================================================
-# 4) ADD DODONPACHI SAIDAI-OU-JOU
-# =================================================
-target = "DoDonPachi Dai-Ou-Jou Tamashii (V201, China)"
-
-new_entry = """<game name="ddpsdoj" index="" image="">
-	<description>DoDonPachi SaiDaiOuJou (2012/ 4/20)</description>
-	<cloneof />
-	<crc />
-	<manufacturer>Cave</manufacturer>
-	<year>2012</year>
-	<genre>Shoot-'Em-Up</genre>
-	<rating />
-	<enabled>Yes</enabled>
-</game>
-"""
-
-lines = VERTICAL_XML.read_text(encoding="utf-8").splitlines(keepends=True)
-out, insert, wait = [], False, False
-
-for line in lines:
-    out.append(line)
-    if target in line:
-        wait = True
-    if wait and "</game>" in line:
-        out.append(new_entry + "\n")
-        insert = True
-        wait = False
-
-if insert:
-    VERTICAL_XML.write_text("".join(out), encoding="utf-8")
-
-# =================================================
-# 5) SPLIT VERTICAL GAMES BY 27 MANUFACTURERS
+# 4) SPLIT VERTICAL GAMES BY 27 MANUFACTURERS
 # =================================================
 root = ET.parse(VERTICAL_XML).getroot()
 
@@ -189,7 +194,7 @@ for manu in PRIORITY:
         )
 
 # =================================================
-# 6) SPLIT VERTICAL SHMUPS BY 27 MANUFACTURERS
+# 5) SPLIT VERTICAL SHMUPS BY 27 MANUFACTURERS
 # =================================================
 shmup_root = ET.parse(GENRES_VERTICAL / "Shoot-'Em-Up.xml").getroot()
 
@@ -209,7 +214,7 @@ for manu in PRIORITY:
         )
 
 # =================================================
-# 7) SPLIT MANUFACTURER → GENRE
+# 6) SPLIT MANUFACTURER → GENRE
 # =================================================
 root = ET.parse(VERTICAL_XML).getroot()
 bucket = defaultdict(lambda: defaultdict(list))
@@ -234,7 +239,7 @@ for manu, genres in bucket.items():
         )
 
 # =================================================
-# 8) NAOMI VERTICAL GAMES
+# 7) NAOMI VERTICAL GAMES
 # =================================================
 menu = ET.Element("menu")
 
@@ -258,7 +263,7 @@ indent(menu)
 ET.ElementTree(menu).write(NAOMI_XML, encoding="utf-8", xml_declaration=True)
 
 # =================================================
-# 9) REMOVE BAD NAOMI GAMES
+# 8) REMOVE BAD NAOMI GAMES
 # =================================================
 root = ET.parse(NAOMI_XML).getroot()
 menu = ET.Element("menu")
@@ -270,5 +275,34 @@ for g in root.findall("game"):
 indent(menu)
 ET.ElementTree(menu).write(NAOMI_XML, encoding="utf-8", xml_declaration=True)
 
+# =================================================
+# 9) MOVE mame.xml TO BASE
+# =================================================
+final_mame = BASE / "mame.xml"
+MAME_XML.replace(final_mame)
+
+# =================================================
+# 10) FIX GENRE STRINGS IN ALL XML FILES
+# =================================================
+print("Fixing genre strings in all XML files...")
+
+replacements = {
+    "<genre>Shoot-'Em-Up</genre>": "<genre>Shoot-&apos;Em-Up</genre>",
+    "<genre>Beat-'Em-Up</genre>": "<genre>Beat-&apos;Em-Up</genre>",
+}
+
+for xml in DB.rglob("*.xml"):
+    text = xml.read_text(encoding="utf-8")
+    original = text
+
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+
+    if text != original:
+        xml.write_text(text, encoding="utf-8")
+        print("✔ Fixed:", xml.relative_to(DB))
+
 print("\n✔ ALL STEPS COMPLETE")
-print("✔ Output root:", DB)
+print("✔ Databases root:", DB)
+print("✔ mame.xml moved to:", final_mame)
+
