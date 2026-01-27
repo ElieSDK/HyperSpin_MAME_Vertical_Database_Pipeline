@@ -1,6 +1,6 @@
 """
 FULL MAME / HYPERSPIN DATABASE PIPELINE
-Same logic, same steps, optimized structure
+FINAL – COMPLETE – STABLE
 """
 
 # =================================================
@@ -13,7 +13,7 @@ from collections import defaultdict
 import re
 
 # =================================================
-# PATHS (EDIT ONLY HERE)
+# PATHS
 # =================================================
 BASE = Path(r"C:\Users\PC\Desktop\HS2026\files")
 
@@ -24,20 +24,23 @@ DB.mkdir(exist_ok=True)
 
 MAME_XML = DB / "mame.xml"
 HS_XML = BASE / "Mame 0.284.xml"
+ALL_GAMES_XML = BASE / "Mame 0.284 All games.xml"
+
 VERTICAL_XML = DB / "Mame 0.284 Vertical.xml"
+NAOMI_XML = DB / "Naomi_Vertical.xml"
 
 GENRES_VERTICAL = DB / "genres - vertical"
 MANU_VERTICAL = DB / "manufacturer - vertical"
 MANU_SHMUPS = DB / "manufacturer - shmups"
 MANU_GENRES = DB / "manufacturer - vertical by genres"
-
-NAOMI_XML = DB / "Naomi_Vertical.xml"
+GENRES_NAOMI = DB / "genres - naomi"
 
 for d in (
     GENRES_VERTICAL,
     MANU_VERTICAL,
     MANU_SHMUPS,
     MANU_GENRES,
+    GENRES_NAOMI,
 ):
     d.mkdir(exist_ok=True)
 
@@ -56,15 +59,15 @@ REMOVE_NAOMI = {"quizqgd","shors2k1","shorse","shorsep","shorsepr"}
 # =================================================
 # HELPERS
 # =================================================
-def clean_filename(name):
-    return re.sub(r'[\\/:*?"<>|]', '', name.strip()) or "Unknown"
+def clean_filename(text):
+    return re.sub(r'[\\/:*?"<>|]', '', (text or "").strip()) or "Unknown"
 
 def normalize(text):
-    return re.sub(r"\s*\(.*?\)", "", text.strip())
+    return re.sub(r"\s*\(.*?\)", "", (text or "").strip())
 
 def pick_manufacturer(raw):
-    parts = re.split(r"\s*/\s*|\s*&\s*|\s*\+\s*", raw)
-    for p in map(normalize, parts):
+    for part in re.split(r"\s*/\s*|\s*&\s*|\s*\+\s*", raw or ""):
+        p = normalize(part)
         if p in PRIORITY:
             return p
     return None
@@ -93,10 +96,12 @@ with open(MAME_XML, "w", encoding="utf-8") as f:
         check=True
     )
 
+mame_root = ET.parse(MAME_XML).getroot()
+
 # =================================================
-# 1b) ADD DODONPACHI SAIDAI-OU-JOU TO HYPERSPIN DB
+# 2) ADD DODONPACHI SAIDAI-OU-JOU TO HYPERSPIN DB
 # =================================================
-print("Adding DoDonPachi SaiDaiOuJou to HyperSpin DB...")
+print("Adding DoDonPachi SaiDaiOuJou...")
 
 target = "DoDonPachi Dai-Ou-Jou Tamashii (V201, China)"
 
@@ -126,104 +131,79 @@ for line in lines:
 
 if inserted:
     HS_XML.write_text("".join(out), encoding="utf-8")
-    print("✔ DoDonPachi added to Mame 0.284.xml")
-else:
-    print("⚠ Target game not found, entry not inserted")
 
 # =================================================
-# 2) KEEP VERTICAL GAMES ONLY
+# 3) KEEP VERTICAL GAMES ONLY
 # =================================================
-print("Filtering vertical games...")
-mame_root = ET.parse(MAME_XML).getroot()
-
 vertical = set()
 for m in mame_root.findall("machine"):
     d = m.find("display")
-    if d is not None and d.get("rotate") in ("90","270"):
+    if d is not None and d.get("rotate") in ("90", "270"):
         vertical.add(m.get("name"))
 
 hs_root = ET.parse(HS_XML).getroot()
 menu = ET.Element("menu")
 
 for g in hs_root.findall("game"):
-    name = g.get("name")
-    parent = (g.findtext("cloneof") or "").strip() or name
+    parent = (g.findtext("cloneof") or "").strip() or g.get("name")
     if parent in vertical:
         menu.append(g)
 
 ET.ElementTree(menu).write(VERTICAL_XML, encoding="utf-8", xml_declaration=True)
 
 # =================================================
-# 3) SPLIT VERTICAL GAMES BY GENRE
+# 4) SPLIT VERTICAL BY GENRE
 # =================================================
 root = ET.parse(VERTICAL_XML).getroot()
 by_genre = defaultdict(list)
 
 for g in root.findall("game"):
-    genre = clean_filename(g.findtext("genre") or "Unknown")
-    by_genre[genre].append(g)
+    by_genre[clean_filename(g.findtext("genre"))].append(g)
 
 for genre, games in by_genre.items():
     m = ET.Element("menu")
     for g in games:
         m.append(g)
-    ET.ElementTree(m).write(
-        GENRES_VERTICAL / f"{genre}.xml",
-        encoding="utf-8",
-        xml_declaration=True
-    )
+    ET.ElementTree(m).write(GENRES_VERTICAL / f"{genre}.xml",
+                            encoding="utf-8", xml_declaration=True)
 
 # =================================================
-# 4) SPLIT VERTICAL GAMES BY 27 MANUFACTURERS
+# 5) SPLIT VERTICAL BY MANUFACTURER
 # =================================================
-root = ET.parse(VERTICAL_XML).getroot()
-
 for manu in PRIORITY:
-    games = [
-        g for g in root.findall("game")
-        if pick_manufacturer(g.findtext("manufacturer") or "") == manu
-    ]
+    games = [g for g in root.findall("game")
+             if pick_manufacturer(g.findtext("manufacturer")) == manu]
     if games:
         m = ET.Element("menu")
         for g in games:
             m.append(g)
-        ET.ElementTree(m).write(
-            MANU_VERTICAL / f"{manu} Games.xml",
-            encoding="utf-8",
-            xml_declaration=True
-        )
+        ET.ElementTree(m).write(MANU_VERTICAL / f"{manu} Games.xml",
+                                encoding="utf-8", xml_declaration=True)
 
 # =================================================
-# 5) SPLIT VERTICAL SHMUPS BY 27 MANUFACTURERS
+# 6) SPLIT SHMUPS BY MANUFACTURER
 # =================================================
-shmup_root = ET.parse(GENRES_VERTICAL / "Shoot-'Em-Up.xml").getroot()
+shmups = ET.parse(GENRES_VERTICAL / "Shoot-'Em-Up.xml").getroot()
 
 for manu in PRIORITY:
-    games = [
-        g for g in shmup_root.findall("game")
-        if pick_manufacturer(g.findtext("manufacturer") or "") == manu
-    ]
+    games = [g for g in shmups.findall("game")
+             if pick_manufacturer(g.findtext("manufacturer")) == manu]
     if games:
         m = ET.Element("menu")
         for g in games:
             m.append(g)
-        ET.ElementTree(m).write(
-            MANU_SHMUPS / f"{manu} Games.xml",
-            encoding="utf-8",
-            xml_declaration=True
-        )
+        ET.ElementTree(m).write(MANU_SHMUPS / f"{manu} Games.xml",
+                                encoding="utf-8", xml_declaration=True)
 
 # =================================================
-# 6) SPLIT MANUFACTURER → GENRE
+# 7) SPLIT MANUFACTURER → GENRE
 # =================================================
-root = ET.parse(VERTICAL_XML).getroot()
 bucket = defaultdict(lambda: defaultdict(list))
 
 for g in root.findall("game"):
-    manu = pick_manufacturer(g.findtext("manufacturer") or "")
+    manu = pick_manufacturer(g.findtext("manufacturer"))
     if manu:
-        genre = g.findtext("genre") or "Unknown"
-        bucket[manu][genre].append(g)
+        bucket[manu][g.findtext("genre") or "Unknown"].append(g)
 
 for manu, genres in bucket.items():
     d = MANU_GENRES / manu
@@ -232,14 +212,11 @@ for manu, genres in bucket.items():
         m = ET.Element("menu")
         for g in games:
             m.append(g)
-        ET.ElementTree(m).write(
-            d / f"{clean_filename(genre)}.xml",
-            encoding="utf-8",
-            xml_declaration=True
-        )
+        ET.ElementTree(m).write(d / f"{clean_filename(genre)}.xml",
+                                encoding="utf-8", xml_declaration=True)
 
 # =================================================
-# 7) NAOMI VERTICAL GAMES
+# 8) NAOMI VERTICAL GAMES
 # =================================================
 menu = ET.Element("menu")
 
@@ -263,7 +240,7 @@ indent(menu)
 ET.ElementTree(menu).write(NAOMI_XML, encoding="utf-8", xml_declaration=True)
 
 # =================================================
-# 8) REMOVE BAD NAOMI GAMES
+# 9) REMOVE BAD NAOMI GAMES
 # =================================================
 root = ET.parse(NAOMI_XML).getroot()
 menu = ET.Element("menu")
@@ -276,16 +253,53 @@ indent(menu)
 ET.ElementTree(menu).write(NAOMI_XML, encoding="utf-8", xml_declaration=True)
 
 # =================================================
-# 9) MOVE mame.xml TO BASE
+# 10) COMPLETE NAOMI GENRES FROM ALL GAMES DB
+# =================================================
+lookup = {
+    g.get("name"): g.findtext("genre")
+    for g in ET.parse(ALL_GAMES_XML).getroot().findall("game")
+}
+
+root = ET.parse(NAOMI_XML).getroot()
+menu = ET.Element("menu")
+
+for g in root.findall("game"):
+    name = g.get("name")
+    genre = g.find("genre")
+    if (genre is None or not (genre.text or "").strip()) and name in lookup:
+        if genre is None:
+            genre = ET.SubElement(g, "genre")
+        genre.text = lookup[name]
+    menu.append(g)
+
+indent(menu)
+ET.ElementTree(menu).write(NAOMI_XML, encoding="utf-8", xml_declaration=True)
+
+# =================================================
+# 11) SPLIT NAOMI BY GENRE
+# =================================================
+root = ET.parse(NAOMI_XML).getroot()
+by_genre = defaultdict(list)
+
+for g in root.findall("game"):
+    by_genre[clean_filename(g.findtext("genre"))].append(g)
+
+for genre, games in by_genre.items():
+    m = ET.Element("menu")
+    for g in games:
+        m.append(g)
+    ET.ElementTree(m).write(GENRES_NAOMI / f"{genre}.xml",
+                            encoding="utf-8", xml_declaration=True)
+
+# =================================================
+# 12) MOVE mame.xml BACK TO BASE
 # =================================================
 final_mame = BASE / "mame.xml"
 MAME_XML.replace(final_mame)
 
 # =================================================
-# 10) FIX GENRE STRINGS IN ALL XML FILES
+# 13) FIX GENRE STRINGS EVERYWHERE
 # =================================================
-print("Fixing genre strings in all XML files...")
-
 replacements = {
     "<genre>Shoot-'Em-Up</genre>": "<genre>Shoot-&apos;Em-Up</genre>",
     "<genre>Beat-'Em-Up</genre>": "<genre>Beat-&apos;Em-Up</genre>",
@@ -293,16 +307,10 @@ replacements = {
 
 for xml in DB.rglob("*.xml"):
     text = xml.read_text(encoding="utf-8")
-    original = text
-
     for old, new in replacements.items():
         text = text.replace(old, new)
-
-    if text != original:
-        xml.write_text(text, encoding="utf-8")
-        print("✔ Fixed:", xml.relative_to(DB))
+    xml.write_text(text, encoding="utf-8")
 
 print("\n✔ ALL STEPS COMPLETE")
-print("✔ Databases root:", DB)
-print("✔ mame.xml moved to:", final_mame)
-
+print("✔ Databases:", DB)
+print("✔ mame.xml:", final_mame)
