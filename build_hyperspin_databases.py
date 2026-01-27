@@ -1,6 +1,5 @@
 """
 FULL MAME / HYPERSPIN DATABASE PIPELINE
-FINAL – COMPLETE – STABLE
 """
 
 # =================================================
