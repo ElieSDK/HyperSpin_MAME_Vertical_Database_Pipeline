@@ -72,12 +72,12 @@ def pick_manufacturer(raw):
     return None
 
 def indent(elem, level=0):
-    i = "\n" + level*"    "
+    i = "\n" + level * "    "
     if len(elem):
         if not elem.text or not elem.text.strip():
             elem.text = i + "    "
         for c in elem:
-            indent(c, level+1)
+            indent(c, level + 1)
         if not elem.tail or not elem.tail.strip():
             elem.tail = i
     elif level and (not elem.tail or not elem.tail.strip()):
@@ -98,21 +98,21 @@ with open(MAME_XML, "w", encoding="utf-8") as f:
 mame_root = ET.parse(MAME_XML).getroot()
 
 # =================================================
-# 2) ADD DODONPACHI SAIDAI-OU-JOU TO HYPERSPIN DB
+# 2) ADD DODONPACHI SAIDAI-OU-JOU
 # =================================================
 print("Adding DoDonPachi SaiDaiOuJou...")
 
 target = "DoDonPachi Dai-Ou-Jou Tamashii (V201, China)"
 
 new_entry = """<game name="ddpsdoj" index="" image="">
-	<description>DoDonPachi SaiDaiOuJou (2012/ 4/20)</description>
-	<cloneof />
-	<crc />
-	<manufacturer>Cave</manufacturer>
-	<year>2012</year>
-	<genre>Shoot-'Em-Up</genre>
-	<rating />
-	<enabled>Yes</enabled>
+    <description>DoDonPachi SaiDaiOuJou (2012/ 4/20)</description>
+    <cloneof />
+    <crc />
+    <manufacturer>Cave</manufacturer>
+    <year>2012</year>
+    <genre>Shoot-&apos;Em-Up</genre>
+    <rating />
+    <enabled>Yes</enabled>
 </game>
 """
 
@@ -132,96 +132,16 @@ if inserted:
     HS_XML.write_text("".join(out), encoding="utf-8")
 
 # =================================================
-# 3) KEEP VERTICAL GAMES ONLY
+# 3) NAOMI VERTICAL GAMES
 # =================================================
-vertical = set()
-for m in mame_root.findall("machine"):
-    d = m.find("display")
-    if d is not None and d.get("rotate") in ("90", "270"):
-        vertical.add(m.get("name"))
+print("Building Naomi vertical database...")
 
-hs_root = ET.parse(HS_XML).getroot()
-menu = ET.Element("menu")
-
-for g in hs_root.findall("game"):
-    parent = (g.findtext("cloneof") or "").strip() or g.get("name")
-    if parent in vertical:
-        menu.append(g)
-
-ET.ElementTree(menu).write(VERTICAL_XML, encoding="utf-8", xml_declaration=True)
-
-# =================================================
-# 4) SPLIT VERTICAL BY GENRE
-# =================================================
-root = ET.parse(VERTICAL_XML).getroot()
-by_genre = defaultdict(list)
-
-for g in root.findall("game"):
-    by_genre[clean_filename(g.findtext("genre"))].append(g)
-
-for genre, games in by_genre.items():
-    m = ET.Element("menu")
-    for g in games:
-        m.append(g)
-    ET.ElementTree(m).write(GENRES_VERTICAL / f"{genre}.xml",
-                            encoding="utf-8", xml_declaration=True)
-
-# =================================================
-# 5) SPLIT VERTICAL BY MANUFACTURER
-# =================================================
-for manu in PRIORITY:
-    games = [g for g in root.findall("game")
-             if pick_manufacturer(g.findtext("manufacturer")) == manu]
-    if games:
-        m = ET.Element("menu")
-        for g in games:
-            m.append(g)
-        ET.ElementTree(m).write(MANU_VERTICAL / f"{manu} Games.xml",
-                                encoding="utf-8", xml_declaration=True)
-
-# =================================================
-# 6) SPLIT SHMUPS BY MANUFACTURER
-# =================================================
-shmups = ET.parse(GENRES_VERTICAL / "Shoot-'Em-Up.xml").getroot()
-
-for manu in PRIORITY:
-    games = [g for g in shmups.findall("game")
-             if pick_manufacturer(g.findtext("manufacturer")) == manu]
-    if games:
-        m = ET.Element("menu")
-        for g in games:
-            m.append(g)
-        ET.ElementTree(m).write(MANU_SHMUPS / f"{manu} Games.xml",
-                                encoding="utf-8", xml_declaration=True)
-
-# =================================================
-# 7) SPLIT MANUFACTURER → GENRE
-# =================================================
-bucket = defaultdict(lambda: defaultdict(list))
-
-for g in root.findall("game"):
-    manu = pick_manufacturer(g.findtext("manufacturer"))
-    if manu:
-        bucket[manu][g.findtext("genre") or "Unknown"].append(g)
-
-for manu, genres in bucket.items():
-    d = MANU_GENRES / manu
-    d.mkdir(exist_ok=True)
-    for genre, games in genres.items():
-        m = ET.Element("menu")
-        for g in games:
-            m.append(g)
-        ET.ElementTree(m).write(d / f"{clean_filename(genre)}.xml",
-                                encoding="utf-8", xml_declaration=True)
-
-# =================================================
-# 8) NAOMI VERTICAL GAMES
-# =================================================
 menu = ET.Element("menu")
 
 for m in mame_root.findall("machine"):
     if m.get("sourcefile","").lower() != "naomi.cpp":
         continue
+
     d = m.find("display")
     if d is None or d.get("rotate") not in ("90","270"):
         continue
@@ -239,7 +159,7 @@ indent(menu)
 ET.ElementTree(menu).write(NAOMI_XML, encoding="utf-8", xml_declaration=True)
 
 # =================================================
-# 9) REMOVE BAD NAOMI GAMES
+# 4) REMOVE BAD NAOMI GAMES
 # =================================================
 root = ET.parse(NAOMI_XML).getroot()
 menu = ET.Element("menu")
@@ -252,7 +172,7 @@ indent(menu)
 ET.ElementTree(menu).write(NAOMI_XML, encoding="utf-8", xml_declaration=True)
 
 # =================================================
-# 10) COMPLETE NAOMI GENRES FROM ALL GAMES DB
+# 5) COMPLETE NAOMI GENRES FROM ALL GAMES DB
 # =================================================
 lookup = {
     g.get("name"): g.findtext("genre")
@@ -275,7 +195,7 @@ indent(menu)
 ET.ElementTree(menu).write(NAOMI_XML, encoding="utf-8", xml_declaration=True)
 
 # =================================================
-# 11) SPLIT NAOMI BY GENRE
+# 5a) SPLIT NAOMI BY GENRE
 # =================================================
 root = ET.parse(NAOMI_XML).getroot()
 by_genre = defaultdict(list)
@@ -289,6 +209,126 @@ for genre, games in by_genre.items():
         m.append(g)
     ET.ElementTree(m).write(GENRES_NAOMI / f"{genre}.xml",
                             encoding="utf-8", xml_declaration=True)
+
+# =================================================
+# 6) MERGE NAOMI INTO MAIN HS DB + SORT
+# =================================================
+print("Merging Naomi into main HyperSpin DB...")
+
+hs_root = ET.parse(HS_XML).getroot()
+naomi_root = ET.parse(NAOMI_XML).getroot()
+
+existing = {g.get("name") for g in hs_root.findall("game")}
+
+for g in naomi_root.findall("game"):
+    if g.get("name") not in existing:
+        hs_root.append(g)
+
+games = sorted(
+    hs_root.findall("game"),
+    key=lambda g: g.get("name", "").lower()
+)
+
+new_root = ET.Element("menu")
+for g in games:
+    new_root.append(g)
+
+indent(new_root)
+ET.ElementTree(new_root).write(
+    HS_XML, encoding="utf-8", xml_declaration=True
+)
+
+# =================================================
+# 7) KEEP VERTICAL GAMES ONLY
+# =================================================
+vertical = set()
+
+for m in mame_root.findall("machine"):
+    d = m.find("display")
+    if d is not None and d.get("rotate") in ("90","270"):
+        vertical.add(m.get("name"))
+
+hs_root = ET.parse(HS_XML).getroot()
+menu = ET.Element("menu")
+
+for g in hs_root.findall("game"):
+    parent = (g.findtext("cloneof") or "").strip() or g.get("name")
+    if parent in vertical:
+        menu.append(g)
+
+ET.ElementTree(menu).write(VERTICAL_XML, encoding="utf-8", xml_declaration=True)
+
+# =================================================
+# 8) SPLIT VERTICAL BY GENRE
+# =================================================
+root = ET.parse(VERTICAL_XML).getroot()
+by_genre = defaultdict(list)
+
+for g in root.findall("game"):
+    by_genre[clean_filename(g.findtext("genre"))].append(g)
+
+for genre, games in by_genre.items():
+    m = ET.Element("menu")
+    for g in games:
+        m.append(g)
+    ET.ElementTree(m).write(
+        GENRES_VERTICAL / f"{genre}.xml",
+        encoding="utf-8", xml_declaration=True
+    )
+
+# =================================================
+# 9) SPLIT VERTICAL BY MANUFACTURER
+# =================================================
+for manu in PRIORITY:
+    games = [
+        g for g in root.findall("game")
+        if pick_manufacturer(g.findtext("manufacturer")) == manu
+    ]
+    if games:
+        m = ET.Element("menu")
+        for g in games:
+            m.append(g)
+        ET.ElementTree(m).write(
+            MANU_VERTICAL / f"{manu} Games.xml",
+            encoding="utf-8", xml_declaration=True
+        )
+
+# =================================================
+# 10) SPLIT SHMUPS BY MANUFACTURER
+# =================================================
+shmups = ET.parse(GENRES_VERTICAL / "Shoot-'Em-Up.xml").getroot()
+
+for manu in PRIORITY:
+    games = [g for g in shmups.findall("game")
+             if pick_manufacturer(g.findtext("manufacturer")) == manu]
+    if games:
+        m = ET.Element("menu")
+        for g in games:
+            m.append(g)
+        ET.ElementTree(m).write(MANU_SHMUPS / f"{manu} Games.xml",
+                                encoding="utf-8", xml_declaration=True)
+
+# =================================================
+# 11) SPLIT MANUFACTURER → GENRE
+# =================================================
+bucket = defaultdict(lambda: defaultdict(list))
+
+for g in root.findall("game"):
+    manu = pick_manufacturer(g.findtext("manufacturer"))
+    if manu:
+        bucket[manu][g.findtext("genre") or "Unknown"].append(g)
+
+for manu, genres in bucket.items():
+    d = MANU_GENRES / manu
+    d.mkdir(exist_ok=True)
+    for genre, games in genres.items():
+        m = ET.Element("menu")
+        for g in games:
+            m.append(g)
+        ET.ElementTree(m).write(
+            d / f"{clean_filename(genre)}.xml",
+            encoding="utf-8", xml_declaration=True
+        )
 
 # =================================================
 # 12) MOVE mame.xml BACK TO BASE
