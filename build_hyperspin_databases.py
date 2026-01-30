@@ -1,5 +1,6 @@
 """
 FULL MAME / HYPERSPIN DATABASE PIPELINE
+FINAL – COMPLETE – STABLE – NAOMI INCLUDED
 """
 
 # =================================================
@@ -49,9 +50,11 @@ for d in (
 PRIORITY = [
     "AMCOE","Atari","Bally","BFM","Capcom","Cave","Data East","Gaelco",
     "IGS","IGT","Irem","Jaleco","Kaneko","Konami","Midway","Namco",
-    "Nichibutsu","Nintendo","Novotech","Psikyo","Sammy","Sega",
-    "Seibu Kaihatsu","SNK","Taito","Williams"
+    "Nichibutsu","Nintendo","Novotech","Psikyo","Sega",
+    "Seibu Kaihatsu","SNK","Taito"
 ]
+
+#"Williams" & "Sammy" remove because few games only
 
 REMOVE_NAOMI = {"quizqgd","shors2k1","shorse","shorsep","shorsepr"}
 
