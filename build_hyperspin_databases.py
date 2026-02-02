@@ -350,3 +350,41 @@ if MANU_GENRES.exists():
 print("\n✔ ALL STEPS COMPLETE")
 print(f"✔ MAME XML stays in: {MAME_XML}")
 print(f"✔ Final databases organized in: {FINAL_DIR}")
+
+# =================================================
+# 15) GENERATE MAMEclrmame.xml FOR CLRMAMEPRO
+# =================================================
+print("Generating MAMEclrmame.xml for ClrMamePro...")
+
+CLRMAME_XML = BASE / "MAMEclrmame.xml"
+FINAL_MAME_DB = MAME_DIR / "MAME.xml"
+
+if FINAL_MAME_DB.exists() and MAME_XML.exists():
+    # 1. Get the list of allowed game names from your filtered MAME.xml
+    filtered_tree = ET.parse(FINAL_MAME_DB)
+    allowed_names = {g.get("name") for g in filtered_tree.findall("game")}
+
+    # 2. Parse the original full mame.xml
+    full_mame_tree = ET.parse(MAME_XML)
+    full_mame_root = full_mame_tree.getroot()
+
+    # 3. Create a new root and append only matching machines
+    new_mame_root = ET.Element("mame")
+    # Copy attributes if necessary (header info)
+    for attr_name, attr_value in full_mame_root.attrib.items():
+        new_mame_root.set(attr_name, attr_value)
+
+    for machine in full_mame_root.findall("machine"):
+        if machine.get("name") in allowed_names:
+            new_mame_root.append(machine)
+
+    # 4. Write the file
+    indent(new_mame_root)
+    ET.ElementTree(new_mame_root).write(
+        CLRMAME_XML, 
+        encoding="utf-8", 
+        xml_declaration=True
+    )
+    print(f"✔ ClrMamePro XML created: {CLRMAME_XML}")
+else:
+    print("✘ Error: Could not find MAME.xml or mame.xml to generate ClrMamePro file.")
