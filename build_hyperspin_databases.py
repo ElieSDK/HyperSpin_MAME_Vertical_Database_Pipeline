@@ -16,14 +16,13 @@ import shutil
 # =================================================
 # PATHS
 # =================================================
-BASE = Path(r"PATH")
+BASE = Path(r"PATH HEREs")
 
 MAME_EXE = BASE / "mame.exe"
 
 DB = BASE / "databases"
 DB.mkdir(exist_ok=True)
 
-# MODIFICATION : MAME_XML est maintenant directement dans BASE
 MAME_XML = BASE / "mame.xml" 
 HS_XML = BASE / "Mame 0.284.xml"
 ALL_GAMES_XML = BASE / "Mame 0.284 All games.xml"
@@ -58,6 +57,9 @@ PRIORITY = [
 
 REMOVE_NAOMI = {"quizqgd","shors2k1","shorse","shorsep","shorsepr"}
 
+# New exclusion list for specific unwanted games
+REMOVE_GAMES = {"kbh", "kbm", "kbm2nd", "kbm3rd"}
+
 # =================================================
 # HELPERS
 # =================================================
@@ -87,7 +89,7 @@ def indent(elem, level=0):
         elem.tail = i
 
 # =================================================
-# 1) GENERATE MAME.XML (DIRECTLY IN BASE)
+# 1) GENERATE MAME.XML
 # =================================================
 print(f"Generating mame.xml in {BASE}...")
 with open(MAME_XML, "w", encoding="utf-8") as f:
@@ -217,19 +219,25 @@ indent(new_root)
 ET.ElementTree(new_root).write(HS_XML, encoding="utf-8", xml_declaration=True)
 
 # =================================================
-# 7) KEEP VERTICAL GAMES ONLY
+# 7) KEEP VERTICAL GAMES ONLY & FILTER BLACKLIST
 # =================================================
+print("Filtering vertical games and applying blacklist...")
 vertical = set()
 for m in mame_root.findall("machine"):
     d = m.find("display")
     if d is not None and d.get("rotate") in ("90","270"):
         vertical.add(m.get("name"))
+
 hs_root = ET.parse(HS_XML).getroot()
 menu = ET.Element("menu")
 for g in hs_root.findall("game"):
-    parent = (g.findtext("cloneof") or "").strip() or g.get("name")
-    if parent in vertical:
+    name = g.get("name")
+    parent = (g.findtext("cloneof") or "").strip() or name
+    
+    # Combined filter: check if vertical AND not in our removal list
+    if parent in vertical and name not in REMOVE_GAMES:
         menu.append(g)
+
 ET.ElementTree(menu).write(VERTICAL_XML, encoding="utf-8", xml_declaration=True)
 
 # =================================================
@@ -259,14 +267,16 @@ for manu in PRIORITY:
 # =================================================
 # 10) SPLIT SHMUPS BY MANUFACTURER
 # =================================================
-shmups = ET.parse(GENRES_VERTICAL / "Shoot-'Em-Up.xml").getroot()
-for manu in PRIORITY:
-    games = [g for g in shmups.findall("game") if pick_manufacturer(g.findtext("manufacturer")) == manu]
-    if games:
-        m = ET.Element("menu")
-        for g in games:
-            m.append(g)
-        ET.ElementTree(m).write(MANU_SHMUPS / f"{manu}.xml", encoding="utf-8", xml_declaration=True)
+shmups_path = GENRES_VERTICAL / "Shoot-'Em-Up.xml"
+if shmups_path.exists():
+    shmups = ET.parse(shmups_path).getroot()
+    for manu in PRIORITY:
+        games = [g for g in shmups.findall("game") if pick_manufacturer(g.findtext("manufacturer")) == manu]
+        if games:
+            m = ET.Element("menu")
+            for g in games:
+                m.append(g)
+            ET.ElementTree(m).write(MANU_SHMUPS / f"{manu}.xml", encoding="utf-8", xml_declaration=True)
 
 # =================================================
 # 11) SPLIT MANUFACTURER → GENRE
@@ -305,7 +315,6 @@ print("Organizing final files into !Final...")
 FINAL_DIR = DB / "!Final"
 FINAL_DIR.mkdir(exist_ok=True)
 
-# --- A) Setup MAME Folder ---
 MAME_DIR = FINAL_DIR / "MAME"
 MAME_DIR.mkdir(exist_ok=True)
 shutil.copy2(VERTICAL_XML, MAME_DIR / "MAME.xml")
@@ -313,7 +322,6 @@ if GENRES_VERTICAL.exists():
     for f in GENRES_VERTICAL.glob("*.xml"):
         shutil.copy2(f, MAME_DIR / f.name)
 
-# --- B) Setup Sega Naomi Folder ---
 NAOMI_DIR = FINAL_DIR / "Sega Naomi"
 NAOMI_DIR.mkdir(exist_ok=True)
 shutil.copy2(NAOMI_XML, NAOMI_DIR / "Sega Naomi.xml")
@@ -321,7 +329,6 @@ if GENRES_NAOMI.exists():
     for f in GENRES_NAOMI.glob("*.xml"):
         shutil.copy2(f, NAOMI_DIR / f.name)
 
-# --- C) Setup Shoot-'Em-Up Folder in !Final ---
 SHMUP_FINAL_FOLDER = FINAL_DIR / "Shoot-'Em-Up"
 SHMUP_FINAL_FOLDER.mkdir(exist_ok=True)
 shmup_main = GENRES_VERTICAL / "Shoot-'Em-Up.xml"
@@ -331,7 +338,6 @@ if MANU_SHMUPS.exists():
     for f in MANU_SHMUPS.glob("*.xml"):
         shutil.copy2(f, SHMUP_FINAL_FOLDER / f.name)
 
-# --- D) Process manufacturer - vertical (Each XML in its own folder) ---
 if MANU_VERTICAL.exists():
     for xml_file in MANU_VERTICAL.glob("*.xml"):
         folder_name = xml_file.stem 
@@ -339,52 +345,31 @@ if MANU_VERTICAL.exists():
         target_folder.mkdir(exist_ok=True)
         shutil.copy2(xml_file, target_folder / xml_file.name)
 
-# --- E) Copy manufacturer - vertical by genres content into !Final ---
 if MANU_GENRES.exists():
     for item in MANU_GENRES.iterdir():
         if item.is_dir():
             shutil.copytree(item, FINAL_DIR / item.name, dirs_exist_ok=True)
-        else:
-            shutil.copy2(item, FINAL_DIR / item.name)
-
-print("\n✔ ALL STEPS COMPLETE")
-print(f"✔ MAME XML stays in: {MAME_XML}")
-print(f"✔ Final databases organized in: {FINAL_DIR}")
 
 # =================================================
 # 15) GENERATE MAMEclrmame.xml FOR CLRMAMEPRO
 # =================================================
 print("Generating MAMEclrmame.xml for ClrMamePro...")
-
 CLRMAME_XML = BASE / "MAMEclrmame.xml"
 FINAL_MAME_DB = MAME_DIR / "MAME.xml"
 
 if FINAL_MAME_DB.exists() and MAME_XML.exists():
-    # 1. Get the list of allowed game names from your filtered MAME.xml
     filtered_tree = ET.parse(FINAL_MAME_DB)
     allowed_names = {g.get("name") for g in filtered_tree.findall("game")}
-
-    # 2. Parse the original full mame.xml
     full_mame_tree = ET.parse(MAME_XML)
     full_mame_root = full_mame_tree.getroot()
-
-    # 3. Create a new root and append only matching machines
     new_mame_root = ET.Element("mame")
-    # Copy attributes if necessary (header info)
     for attr_name, attr_value in full_mame_root.attrib.items():
         new_mame_root.set(attr_name, attr_value)
-
     for machine in full_mame_root.findall("machine"):
         if machine.get("name") in allowed_names:
             new_mame_root.append(machine)
-
-    # 4. Write the file
     indent(new_mame_root)
-    ET.ElementTree(new_mame_root).write(
-        CLRMAME_XML, 
-        encoding="utf-8", 
-        xml_declaration=True
-    )
+    ET.ElementTree(new_mame_root).write(CLRMAME_XML, encoding="utf-8", xml_declaration=True)
     print(f"✔ ClrMamePro XML created: {CLRMAME_XML}")
-else:
-    print("✘ Error: Could not find MAME.xml or mame.xml to generate ClrMamePro file.")
+
+print("\n✔ ALL STEPS COMPLETE")
