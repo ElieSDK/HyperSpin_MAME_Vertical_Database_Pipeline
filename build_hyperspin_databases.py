@@ -16,7 +16,7 @@ import shutil
 # =================================================
 # PATHS
 # =================================================
-BASE = Path(r"PATH HEREs")
+BASE = Path(r"PATH HERE")
 
 MAME_EXE = BASE / "mame.exe"
 
@@ -57,8 +57,8 @@ PRIORITY = [
 
 REMOVE_NAOMI = {"quizqgd","shors2k1","shorse","shorsep","shorsepr"}
 
-# New exclusion list for specific unwanted games
-REMOVE_GAMES = {"kbh", "kbm", "kbm2nd", "kbm3rd"}
+# Exclusion list for specific unwanted games
+REMOVE_GAMES = {"kbh", "kbm", "kbm2nd", "kbm3rd", "cmpmx10", "jammin"}
 
 # =================================================
 # HELPERS
@@ -103,35 +103,50 @@ with open(MAME_XML, "w", encoding="utf-8") as f:
 mame_root = ET.parse(MAME_XML).getroot()
 
 # =================================================
-# 2) ADD DODONPACHI SAIDAI-OU-JOU
+# 2) ADD DODONPACHI SAIDAI-OU-JOU (STANDALONE PARENT)
 # =================================================
-print("Adding DoDonPachi SaiDaiOuJou...")
-target = "DoDonPachi Dai-Ou-Jou Tamashii (V201, China)"
-new_entry = """<game name="ddpsdoj" index="" image="">
-    <description>DoDonPachi SaiDaiOuJou (2012/ 4/20)</description>
-    <cloneof />
-    <crc />
-    <manufacturer>Cave</manufacturer>
-    <year>2012</year>
-    <genre>Shoot-&apos;Em-Up</genre>
-    <rating />
-    <enabled>Yes</enabled>
-</game>
-"""
-lines = HS_XML.read_text(encoding="utf-8").splitlines(keepends=True)
-out, wait, inserted = [], False, False
+print("Checking DoDonPachi SaiDaiOuJou...")
 
-for line in lines:
-    out.append(line)
-    if target in line:
-        wait = True
-    if wait and "</game>" in line:
-        out.append(new_entry + "\n")
-        inserted = True
-        wait = False
+hs_tree = ET.parse(HS_XML)
+hs_root = hs_tree.getroot()
 
-if inserted:
-    HS_XML.write_text("".join(out), encoding="utf-8")
+# 1. Find all instances of ddpsdoj
+existing_ddp = hs_root.findall(".//game[@name='ddpsdoj']")
+
+if not existing_ddp:
+    print("→ Adding ddpsdoj (Parent)...")
+    g = ET.Element("game", name="ddpsdoj", index="", image="")
+    ET.SubElement(g, "description").text = "DoDonPachi SaiDaiOuJou (2012/ 4/20)"
+    ET.SubElement(g, "cloneof").text = ""  # Correct: Parent has no cloneof
+    ET.SubElement(g, "crc").text = ""
+    ET.SubElement(g, "manufacturer").text = "Cave"
+    ET.SubElement(g, "year").text = "2012"
+    ET.SubElement(g, "genre").text = "Shoot-&apos;Em-Up"
+    ET.SubElement(g, "rating").text = ""
+    ET.SubElement(g, "enabled").text = "Yes"
+    hs_root.append(g)
+    
+    indent(hs_root)
+    hs_tree.write(HS_XML, encoding="utf-8", xml_declaration=True)
+    print("✔ SaiDaiOuJou added.")
+
+elif len(existing_ddp) > 1:
+    print(f"→ Found {len(existing_ddp)} copies of ddpsdoj. Cleaning duplicates...")
+    # Keep the first one, remove the rest
+    first_found = False
+    for game in hs_root.findall("game"):
+        if game.get("name") == "ddpsdoj":
+            if not first_found:
+                first_found = True
+                continue
+            hs_root.remove(game)
+            
+    indent(hs_root)
+    hs_tree.write(HS_XML, encoding="utf-8", xml_declaration=True)
+    print("✔ Duplicates removed, kept one parent entry.")
+
+else:
+    print("✔ SaiDaiOuJou parent already correctly present.")
 
 # =================================================
 # 3) NAOMI VERTICAL GAMES
@@ -222,6 +237,10 @@ ET.ElementTree(new_root).write(HS_XML, encoding="utf-8", xml_declaration=True)
 # 7) KEEP VERTICAL GAMES ONLY & FILTER BLACKLIST
 # =================================================
 print("Filtering vertical games and applying blacklist...")
+
+# Define the manual parents that aren't in the official MAME XML
+MANUAL_PARENTS = {"ddpsdoj"}
+
 vertical = set()
 for m in mame_root.findall("machine"):
     d = m.find("display")
@@ -230,15 +249,18 @@ for m in mame_root.findall("machine"):
 
 hs_root = ET.parse(HS_XML).getroot()
 menu = ET.Element("menu")
+
 for g in hs_root.findall("game"):
     name = g.get("name")
     parent = (g.findtext("cloneof") or "").strip() or name
     
-    # Combined filter: check if vertical AND not in our removal list
-    if parent in vertical and name not in REMOVE_GAMES:
+    # NEW LOGIC: Keep if (it's officially vertical OR it's a manual parent) 
+    # AND it's not in the blacklist
+    if (parent in vertical or name in MANUAL_PARENTS) and name not in REMOVE_GAMES:
         menu.append(g)
 
 ET.ElementTree(menu).write(VERTICAL_XML, encoding="utf-8", xml_declaration=True)
+print(f"✔ Vertical filtering complete. '{VERTICAL_XML.name}' updated.")
 
 # =================================================
 # 8) SPLIT VERTICAL BY GENRE
