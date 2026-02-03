@@ -85,7 +85,7 @@ def indent(elem, level=0):
 # =================================================
 # 1) GENERATE & PATCH MAME.XML
 # =================================================
-print(f"Generating mame.xml...")
+print("Generating mame.xml...")
 with open(MAME_XML, "w", encoding="utf-8") as f:
     subprocess.run([MAME_EXE, "-listxml"], stdout=f, stderr=subprocess.DEVNULL, check=True)
 
@@ -171,6 +171,182 @@ for g in naomi_menu.findall("game"):
 sorted_games = sorted(hs_root.findall("game"), key=lambda g: g.get("name", "").lower())
 new_hs_root = ET.Element("menu")
 for g in sorted_games: new_hs_root.append(g)
+indent(new_hs_root)
+ET.ElementTree(new_hs_root).write(HS_XML, encoding="utf-8", xml_declaration=True)
+
+"""
+FULL MAME / HYPERSPIN DATABASE PIPELINE
+FINAL – COMPLETE – STABLE – DYNAMIC INJECTION
+"""
+
+# =================================================
+# IMPORTS
+# =================================================
+import subprocess
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from collections import defaultdict
+import re
+import shutil
+
+# =================================================
+# PATHS
+# =================================================
+BASE = Path(r"C:\Users\PC\OneDrive\Perso\buy\HS2026\files")
+
+MAME_EXE = BASE / "mame.exe"
+DDP_INJECT_XML = BASE / "ddpsdoj.xml" 
+
+DB = BASE / "databases"
+DB.mkdir(exist_ok=True)
+
+MAME_XML = BASE / "mame.xml" 
+HS_XML = BASE / "Mame 0.284.xml"
+ALL_GAMES_XML = BASE / "Mame 0.284 All games.xml"
+
+VERTICAL_XML = DB / "Mame 0.284 Vertical.xml"
+NAOMI_XML = DB / "Naomi_Vertical.xml"
+
+# Directory setup
+DIRS = [
+    DB / "genres - vertical",
+    DB / "manufacturer - vertical",
+    DB / "manufacturer - shmups",
+    DB / "manufacturer - vertical by genres",
+    DB / "genres - naomi"
+]
+for d in DIRS: d.mkdir(exist_ok=True)
+
+# =================================================
+# CONSTANTS & CONFIG
+# =================================================
+PRIORITY = [
+    "AMCOE","Atari","Bally","BFM","Capcom","Cave","Data East","Gaelco",
+    "IGS","IGT","Irem","Jaleco","Kaneko","Konami","Midway","Namco",
+    "Nichibutsu","Nintendo","Novotech","Psikyo","Sammy", "Sega",
+    "Seibu Kaihatsu","SNK","Taito"
+]
+
+REMOVE_NAOMI = {"quizqgd","shors2k1","shorse","shorsep","shorsepr"}
+REMOVE_GAMES = {"kbh", "kbm", "kbm2nd", "kbm3rd", "cmpmx10", "jammin"}
+
+# =================================================
+# HELPERS
+# =================================================
+def clean_filename(text):
+    return re.sub(r'[\\/:*?"<>|]', '', (text or "").strip()) or "Unknown"
+
+def normalize(text):
+    return re.sub(r"\s*\(.*?\)", "", (text or "").strip())
+
+def pick_manufacturer(raw):
+    for part in re.split(r"\s*/\s*|\s*&\s*|\s*\+\s*", raw or ""):
+        p = normalize(part)
+        if p in PRIORITY:
+            return p
+    return None
+
+def indent(elem, level=0):
+    i = "\n" + level * "    "
+    if len(elem):
+        if not elem.text or not elem.text.strip():
+            elem.text = i + "    "
+        for c in elem:
+            indent(c, level + 1)
+        if not elem.tail or not elem.tail.strip():
+            elem.tail = i
+    elif level and (not elem.tail or not elem.tail.strip()):
+        elem.tail = i
+
+# =================================================
+# 1) GENERATE & PATCH MAME.XML
+# =================================================
+print("Generating mame.xml...")
+with open(MAME_XML, "w", encoding="utf-8") as f:
+    subprocess.run([MAME_EXE, "-listxml"], stdout=f, stderr=subprocess.DEVNULL, check=True)
+
+mame_tree = ET.parse(MAME_XML)
+mame_root = mame_tree.getroot()
+
+if DDP_INJECT_XML.exists():
+    print(f"Patching {DDP_INJECT_XML.name} into MAME database...")
+    ddp_element = ET.parse(DDP_INJECT_XML).getroot() 
+    if mame_root.find(f".//machine[@name='{ddp_element.get('name')}']") is None:
+        mame_root.append(ddp_element)
+        indent(mame_root)
+        mame_tree.write(MAME_XML, encoding="utf-8", xml_declaration=True)
+        print("✔ ddpsdoj injected successfully.")
+
+# Load master lookup for Genres
+lookup = {g.get("name"): g.findtext("genre") for g in ET.parse(ALL_GAMES_XML).getroot().findall("game")}
+
+# =================================================
+# 2) BUILD NAOMI & ATOMISWAVE LISTS
+# =================================================
+print("Building Naomi and Atomiswave lists...")
+naomi_menu = ET.Element("menu")
+atomis_list = []
+
+for m in mame_root.findall("machine"):
+    source = m.get("sourcefile", "").lower()
+    disp = m.find("display")
+    if disp is None or disp.get("rotate") not in ("90", "270"):
+        continue
+
+    def create_game_node(machine):
+        g = ET.Element("game", name=machine.get("name"), index="", image="")
+        for t in ("description", "manufacturer", "year"):
+            ET.SubElement(g, t).text = machine.findtext(t) or ""
+        ET.SubElement(g, "genre").text = lookup.get(machine.get("name"), "")
+        ET.SubElement(g, "cloneof").text = machine.get("cloneof") or ""
+        ET.SubElement(g, "crc").text = ""
+        ET.SubElement(g, "rating").text = ""
+        ET.SubElement(g, "enabled").text = "Yes"
+        return g
+
+    if source.endswith("naomi.cpp") and m.get("name") not in REMOVE_NAOMI:
+        naomi_menu.append(create_game_node(m))
+    
+    if source == "sega/dc_atomiswave.cpp":
+        atomis_list.append(create_game_node(m))
+
+# Save Naomi Vertical DB and splits
+indent(naomi_menu)
+ET.ElementTree(naomi_menu).write(NAOMI_XML, encoding="utf-8", xml_declaration=True)
+by_genre_n = defaultdict(list)
+for g in naomi_menu.findall("game"):
+    by_genre_n[clean_filename(g.findtext("genre"))].append(g)
+for genre, games in by_genre_n.items():
+    m_sub = ET.Element("menu")
+    for g in games: m_sub.append(g)
+    ET.ElementTree(m_sub).write(DB / "genres - naomi" / f"{genre}.xml", encoding="utf-8", xml_declaration=True)
+
+# =================================================
+# 3) MERGE INTO MAIN HS DB & SORT
+# =================================================
+print("Merging Naomi and Atomiswave into main HyperSpin DB...")
+hs_tree = ET.parse(HS_XML)
+hs_root = hs_tree.getroot()
+existing = {g.get("name") for g in hs_root.findall("game")}
+
+# Add Naomi games to the master list
+for g in naomi_menu.findall("game"):
+    if g.get("name") not in existing:
+        hs_root.append(g)
+        existing.add(g.get("name"))
+
+# Add Atomiswave games to the master list
+for g in atomis_list:
+    if g.get("name") not in existing:
+        hs_root.append(g)
+        existing.add(g.get("name"))
+
+# FIXED: Define new_hs_root by sorting the master list
+sorted_games = sorted(hs_root.findall("game"), key=lambda x: x.get("name").lower())
+new_hs_root = ET.Element("menu")
+for g in sorted_games:
+    new_hs_root.append(g)
+
 indent(new_hs_root)
 ET.ElementTree(new_hs_root).write(HS_XML, encoding="utf-8", xml_declaration=True)
 
