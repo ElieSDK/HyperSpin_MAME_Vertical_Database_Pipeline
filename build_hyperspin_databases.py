@@ -16,182 +16,6 @@ import shutil
 # =================================================
 # PATHS
 # =================================================
-BASE = Path(r"path")
-
-MAME_EXE = BASE / "mame.exe"
-DDP_INJECT_XML = BASE / "ddpsdoj.xml" # The file you mentioned
-
-DB = BASE / "databases"
-DB.mkdir(exist_ok=True)
-
-MAME_XML = BASE / "mame.xml" 
-HS_XML = BASE / "Mame 0.284.xml"
-ALL_GAMES_XML = BASE / "Mame 0.284 All games.xml"
-
-VERTICAL_XML = DB / "Mame 0.284 Vertical.xml"
-NAOMI_XML = DB / "Naomi_Vertical.xml"
-
-# Directory setup
-DIRS = [
-    DB / "genres - vertical",
-    DB / "manufacturer - vertical",
-    DB / "manufacturer - shmups",
-    DB / "manufacturer - vertical by genres",
-    DB / "genres - naomi"
-]
-for d in DIRS: d.mkdir(exist_ok=True)
-
-# =================================================
-# CONSTANTS & CONFIG
-# =================================================
-PRIORITY = [
-    "AMCOE","Atari","Bally","BFM","Capcom","Cave","Data East","Gaelco",
-    "IGS","IGT","Irem","Jaleco","Kaneko","Konami","Midway","Namco",
-    "Nichibutsu","Nintendo","Novotech","Psikyo","Sega",
-    "Seibu Kaihatsu","SNK","Taito"
-]
-
-REMOVE_NAOMI = {"quizqgd","shors2k1","shorse","shorsep","shorsepr"}
-REMOVE_GAMES = {"kbh", "kbm", "kbm2nd", "kbm3rd", "cmpmx10", "jammin"}
-
-# =================================================
-# HELPERS
-# =================================================
-def clean_filename(text):
-    return re.sub(r'[\\/:*?"<>|]', '', (text or "").strip()) or "Unknown"
-
-def normalize(text):
-    return re.sub(r"\s*\(.*?\)", "", (text or "").strip())
-
-def pick_manufacturer(raw):
-    for part in re.split(r"\s*/\s*|\s*&\s*|\s*\+\s*", raw or ""):
-        p = normalize(part)
-        if p in PRIORITY:
-            return p
-    return None
-
-def indent(elem, level=0):
-    i = "\n" + level * "    "
-    if len(elem):
-        if not elem.text or not elem.text.strip():
-            elem.text = i + "    "
-        for c in elem:
-            indent(c, level + 1)
-        if not elem.tail or not elem.tail.strip():
-            elem.tail = i
-    elif level and (not elem.tail or not elem.tail.strip()):
-        elem.tail = i
-
-# =================================================
-# 1) GENERATE & PATCH MAME.XML
-# =================================================
-print("Generating mame.xml...")
-with open(MAME_XML, "w", encoding="utf-8") as f:
-    subprocess.run([MAME_EXE, "-listxml"], stdout=f, stderr=subprocess.DEVNULL, check=True)
-
-mame_tree = ET.parse(MAME_XML)
-mame_root = mame_tree.getroot()
-
-# INJECTION STEP: Add ddpsdoj from its own XML file into the main MAME tree
-if DDP_INJECT_XML.exists():
-    print(f"Patching {DDP_INJECT_XML.name} into MAME database...")
-    ddp_element = ET.parse(DDP_INJECT_XML).getroot() # This is the <machine> tag
-    
-    # Check if already there to avoid duplicates
-    if mame_root.find(f".//machine[@name='{ddp_element.get('name')}']") is None:
-        mame_root.append(ddp_element)
-        # Re-save the MAME XML so later steps see it as a "real" MAME game
-        indent(mame_root)
-        mame_tree.write(MAME_XML, encoding="utf-8", xml_declaration=True)
-        print("✔ ddpsdoj injected successfully.")
-    else:
-        print("✔ ddpsdoj already exists in MAME tree.")
-
-# =================================================
-# 2) BUILD NAOMI VERTICAL DATABASE
-# =================================================
-print("Building Naomi vertical database...")
-naomi_menu = ET.Element("menu")
-for m in mame_root.findall("machine"):
-    source = m.get("sourcefile", "").lower()
-    if not source.endswith("naomi.cpp"):
-        continue
-    disp = m.find("display")
-    if disp is None or disp.get("rotate") not in ("90", "270"):
-        continue
-    
-    # Filter bad Naomi games
-    if m.get("name") in REMOVE_NAOMI:
-        continue
-
-    g = ET.Element("game", name=m.get("name"), index="", image="")
-    for t in ("description", "manufacturer", "year"):
-        ET.SubElement(g, t).text = m.findtext(t) or ""
-    ET.SubElement(g, "genre").text = "" # Will fill from lookup later
-    ET.SubElement(g, "cloneof").text = m.get("cloneof") or ""
-    ET.SubElement(g, "crc").text = ""
-    ET.SubElement(g, "rating").text = ""
-    ET.SubElement(g, "enabled").text = "Yes"
-    naomi_menu.append(g)
-
-# Lookup Naomi genres from 'All Games' XML
-lookup = {g.get("name"): g.findtext("genre") for g in ET.parse(ALL_GAMES_XML).getroot().findall("game")}
-for g in naomi_menu.findall("game"):
-    if g.get("name") in lookup:
-        g.find("genre").text = lookup[g.get("name")]
-
-indent(naomi_menu)
-ET.ElementTree(naomi_menu).write(NAOMI_XML, encoding="utf-8", xml_declaration=True)
-
-# Split Naomi by genre
-by_genre = defaultdict(list)
-for g in naomi_menu.findall("game"):
-    by_genre[clean_filename(g.findtext("genre"))].append(g)
-for genre, games in by_genre.items():
-    m = ET.Element("menu")
-    for g in games: m.append(g)
-    ET.ElementTree(m).write(DB / "genres - naomi" / f"{genre}.xml", encoding="utf-8", xml_declaration=True)
-
-# =================================================
-# 3) MERGE NAOMI INTO MAIN HS DB & SORT
-# =================================================
-print("Merging Naomi into main HyperSpin DB...")
-hs_tree = ET.parse(HS_XML)
-hs_root = hs_tree.getroot()
-
-# Since we injected ddpsdoj into MAME, we check if it's missing from HS and add it generically
-# Note: SaiDaiOuJou is NOT Naomi, so it will be handled by the Vertical filter below.
-# This loop handles the Sega Naomi merge.
-existing = {g.get("name") for g in hs_root.findall("game")}
-for g in naomi_menu.findall("game"):
-    if g.get("name") not in existing:
-        hs_root.append(g)
-
-# Sort everything alphabetically
-sorted_games = sorted(hs_root.findall("game"), key=lambda g: g.get("name", "").lower())
-new_hs_root = ET.Element("menu")
-for g in sorted_games: new_hs_root.append(g)
-indent(new_hs_root)
-ET.ElementTree(new_hs_root).write(HS_XML, encoding="utf-8", xml_declaration=True)
-
-"""
-FULL MAME / HYPERSPIN DATABASE PIPELINE
-FINAL – COMPLETE – STABLE – DYNAMIC INJECTION
-"""
-
-# =================================================
-# IMPORTS
-# =================================================
-import subprocess
-import xml.etree.ElementTree as ET
-from pathlib import Path
-from collections import defaultdict
-import re
-import shutil
-
-# =================================================
-# PATHS
-# =================================================
 BASE = Path(r"C:\Users\PC\OneDrive\Perso\buy\HS2026\files")
 
 MAME_EXE = BASE / "mame.exe"
@@ -221,14 +45,26 @@ for d in DIRS: d.mkdir(exist_ok=True)
 # CONSTANTS & CONFIG
 # =================================================
 PRIORITY = [
-    "AMCOE","Atari","Bally","BFM","Capcom","Cave","Data East","Gaelco",
+    "Atari","Bally","BFM","Capcom","Cave","Data East","Gaelco",
     "IGS","IGT","Irem","Jaleco","Kaneko","Konami","Midway","Namco",
     "Nichibutsu","Nintendo","Novotech","Psikyo","Sammy", "Sega",
     "Seibu Kaihatsu","SNK","Taito"
 ]
 
 REMOVE_NAOMI = {"quizqgd","shors2k1","shorse","shorsep","shorsepr"}
-REMOVE_GAMES = {"kbh", "kbm", "kbm2nd", "kbm3rd", "cmpmx10", "jammin"}
+REMOVE_GAMES = {
+    "kbh", "kbm", "kbm2nd", "kbm3rd", "cmpmx10", "jammin",
+    "rockn", "rockn2", "rockn3", "rockn4", "rockna",
+    "re900", "re800v1a", "re800v3", "jantotsu", "daifugo",
+    "cdsteljn", "ron2", "luckyrlt", "msjiken", "telmahjn",
+    "aerofgtsg", "brvbladeg", "cburnrub2", "cruisin5", "cdiscon1",
+    "kas89", "cpsoccerj", "cpsoccer", "cptennis", "cptennisj",
+    "sidewndr", "spellbnd", "sdtennis", "supdrapob", "setaroul",
+    "sidampkr", "sidampkra", "39in1", "4in1", "decodark16",
+    "decomult", "sspacaho", "twinbeeb", "shikigama", "re800v1",
+    "re800ea", "rcirulet", "multiped", "decodark15", "decodark",
+    "supdrapo", "supdrapoa"
+}
 
 # =================================================
 # HELPERS
@@ -341,7 +177,31 @@ for g in atomis_list:
         hs_root.append(g)
         existing.add(g.get("name"))
 
-# FIXED: Define new_hs_root by sorting the master list
+# --- RESTRUCTURE DDP RELATIONSHIPS ---
+print("Applying DDP Parent/Clone swap in HyperSpin XML...")
+NEW_PARENT = "ddpdojblk"
+OLD_PARENT = "ddp3"
+
+for g in hs_root.findall("game"):
+    name = g.get("name")
+    clone_node = g.find("cloneof")
+    
+    if name == NEW_PARENT:
+        # Make ddpdojblk the parent (clear cloneof)
+        if clone_node is not None:
+            clone_node.text = ""
+            
+    elif name == OLD_PARENT:
+        # Make ddp3 a clone of ddpdojblk
+        if clone_node is not None:
+            clone_node.text = NEW_PARENT
+            
+    elif clone_node is not None and clone_node.text == OLD_PARENT:
+        # All other sub-clones (ddpdoja, ddpdojp, etc) now point to ddpdojblk
+        clone_node.text = NEW_PARENT
+# -------------------------------------
+
+# Sort everything alphabetically
 sorted_games = sorted(hs_root.findall("game"), key=lambda x: x.get("name").lower())
 new_hs_root = ET.Element("menu")
 for g in sorted_games:
