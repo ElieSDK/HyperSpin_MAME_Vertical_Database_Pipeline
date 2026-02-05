@@ -16,7 +16,7 @@ import shutil
 # =================================================
 # PATHS
 # =================================================
-BASE = Path(r"PATH")
+BASE = Path(r"path")
 
 MAME_EXE = BASE / "mame.exe"
 DDP_INJECT_XML = BASE / "ddpsdoj.xml" # The file you mentioned
